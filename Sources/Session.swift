@@ -11,42 +11,76 @@ public struct Result<Value> {
     }
 }
 
+public enum HttpSource {
+    case none
+    case origin
+    case cache
+}
+
 public class Session<C: Client> {
     public var debug = false
     
     public var urlSession: URLSession
     public let client: C
     
-    public init(with client: C, using urlSession: URLSession=URLSession.shared) {
+    public init(with client: C, using urlSession: URLSession = URLSession.shared) {
         self.client = client
         self.urlSession = urlSession
     }
+    
+    public func dataTask<C: Call>(for call: C,
+                                  returnCachedResponse: Bool,
+                                  cachePolicy: NSURLRequest.CachePolicy,
+                                  completion: @escaping (Result<C.Parser.OutputType>, HttpSource) -> Void) -> URLSessionDataTask {
 
-    public func dataTask<C: Call>(for call: C, completion: @escaping (Result<C.Parser.OutputType>) -> Void) -> URLSessionDataTask {
-        let urlRequest = client.encode(call: call)
+        var urlRequest = client.encode(call: call)
+        
+        urlRequest.cachePolicy = returnCachedResponse && self.urlSession.configuration.urlCache?.cachedResponse(for: urlRequest) != nil ? .returnCacheDataDontLoad : cachePolicy
+        
         weak var tsk: URLSessionDataTask?
         let task = urlSession.dataTask(with: urlRequest) { data, response, error in
             let sessionResult = URLSessionTaskResult(response: response, data: data, error: error)
-
+            
             if let tsk = tsk, self.debug {
-                print("\(tsk.requestDescription)\n\(sessionResult)")
+//                print("\(tsk.requestDescription)\n\(sessionResult)")
             }
-
+            
             let result = self.transform(sessionResult: sessionResult, for: call)
-
-            DispatchQueue.main.async {
-                completion(result)
+            
+            if returnCachedResponse,
+               let urlCache = self.urlSession.configuration.urlCache,
+               let cachedResponse = urlCache.cachedResponse(for: urlRequest),
+               let httpResponse = cachedResponse.response as? HTTPURLResponse {
+                
+                let sessionResult = URLSessionTaskResult(response: httpResponse, data: data, error: error)
+                let result = self.transform(sessionResult: sessionResult, for: call)
+                
+                DispatchQueue.main.async {
+                    completion(result, .cache)
+                }
+                
+            } else {
+                
+                DispatchQueue.main.async {
+                    completion(result, .origin)
+                }
+                
             }
+            
         }
-        tsk = task //keep a weak reference for debug output
 
+        tsk = task // Keep a weak reference for debug output
+        
         return task
     }
     
 #if compiler(>=5.5) && canImport(_Concurrency)
     
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0,  *)
-    public func dataTask<C: Call>(for call: C) async throws -> (C.Parser.OutputType, HTTPURLResponse) {
+    public func dataTask<C: Call>(for call: C,
+                                  loadWidthCache: Bool,
+                                  offlineCaching: Bool,
+                                  cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HttpSource) {
         var cancelledBeforeStart = false
         var task: URLSessionDataTask?
         
@@ -62,7 +96,11 @@ public class Session<C: Client> {
                         return
                     }
                     
-                    task = dataTask(for: call, completion: { result in
+                    task = dataTask(for: call,
+                                    returnCachedResponse: loadWidthCache,
+                                    cachePolicy: cachePolicy,
+                                    completion: { result, source in
+                        
                         result.onSuccess { response in
                             guard let response = result.response,
                                   let body = result.value
@@ -70,10 +108,40 @@ public class Session<C: Client> {
                                 continuation.resume(throwing: HttpError.NoResponse)
                                 return
                             }
+
+                            continuation.resume(returning: HttpResult(value: body, response: response, source: source))
                             
-                            continuation.resume(returning: HttpResult(value: body, response: response))
                         }.onError { error in
-                            continuation.resume(throwing: error)
+                            
+                            if offlineCaching {
+                                
+                                // Return cached response if available
+                                task = self.dataTask(for: call,
+                                                     returnCachedResponse: true,
+                                                     cachePolicy: cachePolicy,
+                                                     completion: { result, source in
+                                    result.onSuccess { response in
+                                        guard let response = result.response,
+                                              let body = result.value
+                                        else {
+                                            continuation.resume(throwing: HttpError.NoResponseNoCache)
+                                            return
+                                        }
+                                        
+                                        continuation.resume(returning: HttpResult(value: body, response: response, source: source))
+                                        
+                                    }.onError { error in
+                                        
+                                        continuation.resume(throwing: error)
+                                    }
+                                })
+                                
+                                task?.resume()
+                                
+                            } else {
+                                continuation.resume(throwing: HttpError.NoResponse)
+                            }
+                            
                         }
                     })
                     
@@ -84,29 +152,31 @@ public class Session<C: Client> {
             }
         )
         
-        return (result.value, result.response)
+        return (result.value, result.response, result.source)
     }
     
     private struct HttpResult<C: Call> {
         let value: C.Parser.OutputType
         let response: HTTPURLResponse
+        let source: HttpSource
     }
     
     enum HttpError: Error {
         case NoResponse
+        case NoResponseNoCache
     }
     
 #endif
-
+    
     func transform<C: Call>(sessionResult: URLSessionTaskResult, for call: C) -> Result<C.Parser.OutputType> {
         var result = Result<C.Parser.OutputType>(response: sessionResult.httpResponse)
-
+        
         do {
             result.value = try client.parse(sessionTaskResult: sessionResult, for: call)
         } catch {
             result.error = error
         }
-
+        
         return result
     }
 }
