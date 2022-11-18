@@ -17,6 +17,18 @@ public enum HttpSource {
     case cache
 }
 
+public struct HttpResult<C: Call> {
+    public let value: C.Parser.OutputType
+    public let response: HTTPURLResponse
+    public let source: HttpSource
+}
+
+public enum HttpError<C: Call>: Error {
+    case NoResponse
+    case NoResponseNoCache
+    case NoResponseWithCache((HttpResult<C>, Error))
+}
+
 public class Session<C: Client> {
     public var debug = false
     
@@ -32,7 +44,7 @@ public class Session<C: Client> {
                                   returnCachedResponse: Bool,
                                   cachePolicy: NSURLRequest.CachePolicy,
                                   completion: @escaping (Result<C.Parser.OutputType>, HttpSource) -> Void) -> URLSessionDataTask {
-
+        
         var urlRequest = client.encode(call: call)
         
         urlRequest.cachePolicy = returnCachedResponse && self.urlSession.configuration.urlCache?.cachedResponse(for: urlRequest) != nil ? .returnCacheDataDontLoad : cachePolicy
@@ -42,7 +54,7 @@ public class Session<C: Client> {
             let sessionResult = URLSessionTaskResult(response: response, data: data, error: error)
             
             if let tsk = tsk, self.debug {
-//                print("\(tsk.requestDescription)\n\(sessionResult)")
+                //                print("\(tsk.requestDescription)\n\(sessionResult)")
             }
             
             let result = self.transform(sessionResult: sessionResult, for: call)
@@ -83,6 +95,7 @@ public class Session<C: Client> {
                                   cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HttpSource) {
         var cancelledBeforeStart = false
         var task: URLSessionDataTask?
+        var taskCache: URLSessionDataTask?
         
         let cancelTask = {
             cancelledBeforeStart = true
@@ -105,10 +118,10 @@ public class Session<C: Client> {
                             guard let response = result.response,
                                   let body = result.value
                             else {
-                                continuation.resume(throwing: HttpError.NoResponse)
+                                continuation.resume(throwing: HttpError<C>.NoResponse)
                                 return
                             }
-
+                            
                             continuation.resume(returning: HttpResult(value: body, response: response, source: source))
                             
                         }.onError { error in
@@ -116,30 +129,32 @@ public class Session<C: Client> {
                             if offlineCaching {
                                 
                                 // Return cached response if available
-                                task = self.dataTask(for: call,
-                                                     returnCachedResponse: true,
-                                                     cachePolicy: cachePolicy,
-                                                     completion: { result, source in
+                                taskCache = self.dataTask(for: call,
+                                                          returnCachedResponse: true,
+                                                          cachePolicy: cachePolicy,
+                                                          completion: { result, source in
                                     result.onSuccess { response in
                                         guard let response = result.response,
                                               let body = result.value
                                         else {
-                                            continuation.resume(throwing: HttpError.NoResponseNoCache)
+                                            continuation.resume(throwing: HttpError<C>.NoResponseNoCache)
                                             return
                                         }
                                         
-                                        continuation.resume(returning: HttpResult(value: body, response: response, source: source))
+                                        //                                        continuation.resume(returning: HttpResult(value: body, response: response, source: source))
+                                        continuation.resume(throwing: HttpError<C>.NoResponseWithCache((HttpResult<C>(value: body, response: response, source: source), error)))
                                         
-                                    }.onError { error in
+                                    }.onError { _ in
                                         
-                                        continuation.resume(throwing: error)
+                                        continuation.resume(throwing: HttpError<C>.NoResponseNoCache)
+                                        
                                     }
                                 })
                                 
-                                task?.resume()
+                                taskCache?.resume()
                                 
                             } else {
-                                continuation.resume(throwing: HttpError.NoResponse)
+                                continuation.resume(throwing: HttpError<C>.NoResponse)
                             }
                             
                         }
@@ -155,16 +170,17 @@ public class Session<C: Client> {
         return (result.value, result.response, result.source)
     }
     
-    private struct HttpResult<C: Call> {
-        let value: C.Parser.OutputType
-        let response: HTTPURLResponse
-        let source: HttpSource
-    }
+//    public struct HttpResult<C: Call> {
+//        let value: C.Parser.OutputType
+//        let response: HTTPURLResponse
+//        let source: HttpSource
+//    }
     
-    enum HttpError: Error {
-        case NoResponse
-        case NoResponseNoCache
-    }
+//    public enum HttpError<C: Call>: Error {
+//        case NoResponse
+//        case NoResponseNoCache
+//        case NoResponseWithCache(HttpResult<C>, Error)
+//    }
     
 #endif
     
