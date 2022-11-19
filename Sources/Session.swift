@@ -11,22 +11,34 @@ public struct Result<Value> {
     }
 }
 
-public enum HttpSource {
+public enum HTTPSource {
     case none
     case origin
     case cache
 }
 
-public struct HttpResult<C: Call> {
+public struct HTTPResult<C: Call> {
     public let value: C.Parser.OutputType
     public let response: HTTPURLResponse
-    public let source: HttpSource
+    public let source: HTTPSource
 }
 
-public enum HttpError<C: Call>: Error {
-    case NoResponse
-    case NoResponseNoCache
-    case NoResponseWithCache((HttpResult<C>, Error))
+public enum HTTPError<C: Call>: Error {
+    case noResponse
+    case noResponseNoCache
+    case noResponseWithCache((HTTPResult<C>, Error))
+}
+
+public struct EndpointsResult<T> {
+    public init(value: T, response: HTTPURLResponse, source: HTTPSource) {
+        self.value = value
+        self.response = response
+        self.source = source
+    }
+    
+    public let value: T
+    public let response: HTTPURLResponse
+    public let source: HTTPSource
 }
 
 public class Session<C: Client> {
@@ -43,7 +55,7 @@ public class Session<C: Client> {
     public func dataTask<C: Call>(for call: C,
                                   returnCachedResponse: Bool,
                                   cachePolicy: NSURLRequest.CachePolicy,
-                                  completion: @escaping (Result<C.Parser.OutputType>, HttpSource) -> Void) -> URLSessionDataTask {
+                                  completion: @escaping (Result<C.Parser.OutputType>, HTTPSource) -> Void) -> URLSessionDataTask {
         
         var urlRequest = client.encode(call: call)
         
@@ -92,7 +104,7 @@ public class Session<C: Client> {
     public func dataTask<C: Call>(for call: C,
                                   loadWidthCache: Bool,
                                   offlineCaching: Bool,
-                                  cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HttpSource) {
+                                  cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HTTPSource) {
         var cancelledBeforeStart = false
         var task: URLSessionDataTask?
         var taskCache: URLSessionDataTask?
@@ -104,7 +116,7 @@ public class Session<C: Client> {
         
         let result = try await withTaskCancellationHandler(
             operation: {
-                try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<HttpResult<C>, Error>) in
+                try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<HTTPResult<C>, Error>) in
                     if cancelledBeforeStart {
                         return
                     }
@@ -118,11 +130,11 @@ public class Session<C: Client> {
                             guard let response = result.response,
                                   let body = result.value
                             else {
-                                continuation.resume(throwing: HttpError<C>.NoResponse)
+                                continuation.resume(throwing: HTTPError<C>.noResponse)
                                 return
                             }
                             
-                            continuation.resume(returning: HttpResult(value: body, response: response, source: source))
+                            continuation.resume(returning: HTTPResult(value: body, response: response, source: source))
                             
                         }.onError { error in
                             
@@ -137,16 +149,16 @@ public class Session<C: Client> {
                                         guard let response = result.response,
                                               let body = result.value
                                         else {
-                                            continuation.resume(throwing: HttpError<C>.NoResponseNoCache)
+                                            continuation.resume(throwing: HTTPError<C>.noResponseNoCache)
                                             return
                                         }
                                         
                                         //                                        continuation.resume(returning: HttpResult(value: body, response: response, source: source))
-                                        continuation.resume(throwing: HttpError<C>.NoResponseWithCache((HttpResult<C>(value: body, response: response, source: source), error)))
+                                        continuation.resume(throwing: HTTPError<C>.noResponseWithCache((HTTPResult<C>(value: body, response: response, source: source), error)))
                                         
                                     }.onError { _ in
                                         
-                                        continuation.resume(throwing: HttpError<C>.NoResponseNoCache)
+                                        continuation.resume(throwing: HTTPError<C>.noResponseNoCache)
                                         
                                     }
                                 })
@@ -154,7 +166,7 @@ public class Session<C: Client> {
                                 taskCache?.resume()
                                 
                             } else {
-                                continuation.resume(throwing: HttpError<C>.NoResponse)
+                                continuation.resume(throwing: HTTPError<C>.noResponse)
                             }
                             
                         }
@@ -169,19 +181,7 @@ public class Session<C: Client> {
         
         return (result.value, result.response, result.source)
     }
-    
-//    public struct HttpResult<C: Call> {
-//        let value: C.Parser.OutputType
-//        let response: HTTPURLResponse
-//        let source: HttpSource
-//    }
-    
-//    public enum HttpError<C: Call>: Error {
-//        case NoResponse
-//        case NoResponseNoCache
-//        case NoResponseWithCache(HttpResult<C>, Error)
-//    }
-    
+
 #endif
     
     func transform<C: Call>(sessionResult: URLSessionTaskResult, for call: C) -> Result<C.Parser.OutputType> {

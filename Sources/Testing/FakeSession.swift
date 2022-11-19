@@ -12,7 +12,7 @@ public class FakeSession<C: Client>: Session<C> {
     override public func dataTask<C : Call>(for call: C,
                                             returnCachedResponse: Bool,
                                             cachePolicy: NSURLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
-                                            completion: @escaping (Result<C.Parser.OutputType>, HttpSource) -> Void) -> URLSessionDataTask {
+                                            completion: @escaping (Result<C.Parser.OutputType>, HTTPSource) -> Void) -> URLSessionDataTask {
         return FakeURLSessionDataTask {
             DispatchQueue.global().async {
                 let sessionResult = self.resultProvider.resultFor(call: call)

@@ -6,7 +6,7 @@ public extension Session {
                         loadWidthCache: Bool,
                         offlineCaching: Bool = true,
                         cachePolicy: NSURLRequest.CachePolicy,
-                        completion: @escaping (Result<C.Parser.OutputType>, HttpSource) -> Void) -> URLSessionDataTask {
+                        completion: @escaping (Result<C.Parser.OutputType>, HTTPSource) -> Void) -> URLSessionDataTask {
         let tsk = dataTask(for: call, returnCachedResponse: false, cachePolicy: cachePolicy, completion: completion) // TODO: Make returnCachedResponse
         tsk.resume()
         return tsk
@@ -18,7 +18,7 @@ public extension Session {
     func start<C: Call>(call: C,
                         loadWidthCache: Bool,
                         offlineCaching: Bool = true,
-                        cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HttpSource) {
+                        cachePolicy: NSURLRequest.CachePolicy) async throws -> (C.Parser.OutputType, HTTPURLResponse, HTTPSource) {
         return try await dataTask(for: call, loadWidthCache: loadWidthCache, offlineCaching: offlineCaching, cachePolicy: cachePolicy)
     }
     
