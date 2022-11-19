@@ -18,6 +18,12 @@ public enum HTTPSource {
 }
 
 public struct HTTPResult<C: Call> {
+    public init(value: C.Parser.OutputType, response: HTTPURLResponse, source: HTTPSource) {
+        self.value = value
+        self.response = response
+        self.source = source
+    }
+    
     public let value: C.Parser.OutputType
     public let response: HTTPURLResponse
     public let source: HTTPSource
@@ -27,18 +33,6 @@ public enum HTTPError<C: Call>: Error {
     case noResponse
     case noResponseNoCache
     case noResponseWithCache((HTTPResult<C>, Error))
-}
-
-public struct EndpointsResult<T> {
-    public init(value: T, response: HTTPURLResponse, source: HTTPSource) {
-        self.value = value
-        self.response = response
-        self.source = source
-    }
-    
-    public let value: T
-    public let response: HTTPURLResponse
-    public let source: HTTPSource
 }
 
 public class Session<C: Client> {
