@@ -13,6 +13,7 @@ public struct Result<Value> {
 
 public enum HTTPSource {
     case none
+    case placeholder
     case origin
     case cache
 }
@@ -31,7 +32,7 @@ public struct HTTPResult<C: Call> {
 
 public enum HTTPError<C: Call>: Error {
     case noResponse
-    case noResponseNoCache
+    case noResponseNoCache(Error)
     case noResponseWithCache((HTTPResult<C>, Error))
 }
 
@@ -143,7 +144,7 @@ public class Session<C: Client> {
                                         guard let response = result.response,
                                               let body = result.value
                                         else {
-                                            continuation.resume(throwing: HTTPError<C>.noResponseNoCache)
+                                            continuation.resume(throwing: HTTPError<C>.noResponseNoCache(error))
                                             return
                                         }
                                         
@@ -152,7 +153,7 @@ public class Session<C: Client> {
                                         
                                     }.onError { _ in
                                         
-                                        continuation.resume(throwing: HTTPError<C>.noResponseNoCache)
+                                        continuation.resume(throwing: HTTPError<C>.noResponseNoCache(error))
                                         
                                     }
                                 })
